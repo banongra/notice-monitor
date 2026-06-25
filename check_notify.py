@@ -292,6 +292,7 @@ def get_infocom_notices(site_name, url):
         title = ""
         views = ""
 
+        # 날짜 줄 자체에 조회수가 붙은 경우
         same_line_view_match = re.search(
             r"20\d{2}\s*[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}\.?\s+(\d+)",
             line
@@ -300,11 +301,24 @@ def get_infocom_notices(site_name, url):
         if same_line_view_match:
             views = same_line_view_match.group(1)
 
+        # 날짜 다음 줄이 숫자면 조회수로 판단
         if not views and i + 1 < len(lines) and is_number_text(lines[i + 1]):
             views = clean_text(lines[i + 1])
 
-        for j in range(i - 1, max(i - 6, -1), -1):
+        # 날짜 위쪽에서 제목 찾기
+        # 제목과 날짜 사이에 첨부파일/new/icon 등이 끼는 경우가 있어서 12줄까지 탐색
+        for j in range(i - 1, max(i - 13, -1), -1):
             candidate = clean_text(lines[j])
+
+            # 제목 후보에서 제외할 잡음
+            noise_words = [
+                "첨부", "첨부파일", "파일", "new", "NEW",
+                "N", "아이콘", "조회", "조회수",
+                "작성일", "등록일", "분류"
+            ]
+
+            if any(word in candidate for word in noise_words):
+                continue
 
             if not is_probable_notice_title(candidate):
                 continue
@@ -329,8 +343,7 @@ def get_infocom_notices(site_name, url):
             "id": f"{site_name}_{title}_{date}"
         })
 
-    return deduplicate_notices(notices)[:30]
-
+    return deduplicate_notices(notices)[:50]
 
 # ==============================
 # 5. 사이트별 공지 가져오기
