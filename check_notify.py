@@ -28,7 +28,7 @@ headers = {
 }
 
 # 여기에 디스코드 웹훅 URL 붙여넣기
-DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1518853202685067477/RPX_KJs5JwpwIYS8Db0fgJAT_HzN4nj7IST_D48HE6WPFA1LzsiPLVRvpwpG3URS8Baz"
+DISCORD_WEBHOOK_URL = os.environ.get("https://discordapp.com/api/webhooks/1518853202685067477/RPX_KJs5JwpwIYS8Db0fgJAT_HzN4nj7IST_D48HE6WPFA1LzsiPLVRvpwpG3URS8Baz")
 
 
 # ==============================
@@ -364,7 +364,7 @@ def save_seen_notices(seen_notices):
 # 7. 디스코드 알림
 # ==============================
 def send_discord_notification(notice):
-    if DISCORD_WEBHOOK_URL == "여기에_디스코드_웹훅_URL_붙여넣기":
+    if not DISCORD_WEBHOOK_URL:
         print("[알림 생략] 디스코드 웹훅 URL이 설정되지 않았습니다.")
         return
 
@@ -411,6 +411,14 @@ def check_all_sites():
         notices = get_notices(site["name"], site["url"])
         print(f"가져온 공지 수: {len(notices)}")
 
+        print("가져온 공지 목록:")
+        for idx, notice in enumerate(notices, start=1):
+            print(
+                f"{idx}. [{notice.get('date', '')}] "
+                f"{notice.get('title', '')} "
+                f"/ id={notice.get('id', '')}"
+            )
+
         for notice in notices:
             if notice["id"] not in seen_notices:
                 new_notices.append(notice)
@@ -421,7 +429,6 @@ def check_all_sites():
     save_seen_notices(seen_notices)
 
     return all_notices, new_notices
-
 
 def main():
     print("=" * 60)
