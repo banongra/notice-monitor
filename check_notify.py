@@ -27,8 +27,8 @@ headers = {
     "User-Agent": "Mozilla/5.0"
 }
 
-# 여기에 디스코드 웹훅 URL 붙여넣기
-DISCORD_WEBHOOK_URL = os.environ.get("https://discordapp.com/api/webhooks/1518853202685067477/RPX_KJs5JwpwIYS8Db0fgJAT_HzN4nj7IST_D48HE6WPFA1LzsiPLVRvpwpG3URS8Baz")
+# GitHub Actions Secret에서 불러옴
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
 
 # ==============================
@@ -60,72 +60,8 @@ def is_number_text(text):
     return text.isdigit()
 
 
-def split_same_line_title_date_views(text):
-    text = clean_text(text)
-
-    pattern = r"(20\d{2})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})\.?\s*(\d+)?"
-    match = re.search(pattern, text)
-
-    if not match:
-        return "", "", ""
-
-    title = clean_text(text[:match.start()])
-    date = f"{match.group(1)}-{match.group(2).zfill(2)}-{match.group(3).zfill(2)}"
-    views = match.group(4) if match.group(4) else ""
-
-    return title, date, views
-
-
-def is_bad_title(title):
-    title = clean_text(title)
-
-    if not title:
-        return True
-
-    if len(title) < 5:
-        return True
-
-    bad_words = [
-        "로그인", "회원가입", "사이트맵",
-        "주메뉴 바로가기", "본문 바로가기", "하단 바로가기",
-        "학생회", "인스타", "인스타그램",
-    ]
-
-    if any(word.lower() in title.lower() for word in bad_words):
-        return True
-
-    if title.isdigit():
-        return True
-
-    if extract_date(title):
-        return True
-
-    if title.startswith("http"):
-        return True
-
-    return False
-
-
-def is_probable_notice_title(text):
-    text = clean_text(text)
-
-    if is_bad_title(text):
-        return False
-
-    if is_number_text(text):
-        return False
-
-    if len(text) < 8:
-        return False
-
-    if not re.search(r"[가-힣A-Za-z0-9]", text):
-        return False
-
-    return True
-
-
 def get_response_soup(url):
-    response = requests.get(url, headers=headers, timeout=10)
+    response = requests.get(url, headers=headers, timeout=15)
     response.raise_for_status()
     response.encoding = response.apparent_encoding
     return BeautifulSoup(response.text, "html.parser")
@@ -149,6 +85,7 @@ def normalize_link(base_url, href):
 def find_link_for_title(soup, base_url, title):
     title_clean = clean_text(title)
 
+    # 1차: 완전 일치
     for a in soup.find_all("a"):
         a_text = clean_text(a.get_text(" ", strip=True))
         href = a.get("href")
@@ -159,6 +96,7 @@ def find_link_for_title(soup, base_url, title):
         if title_clean == a_text:
             return normalize_link(base_url, href)
 
+    # 2차: 부분 일치
     for a in soup.find_all("a"):
         a_text = clean_text(a.get_text(" ", strip=True))
         href = a.get("href")
@@ -192,12 +130,49 @@ def deduplicate_notices(notices):
     return unique
 
 
+def is_probable_notice_title(text):
+    text = clean_text(text)
+
+    if not text:
+        return False
+
+    if len(text) < 5:
+        return False
+
+    if text.isdigit():
+        return False
+
+    if extract_date(text):
+        return False
+
+    if text.startswith("http"):
+        return False
+
+    # 메뉴/푸터/SNS 계열만 최소한으로 제외
+    bad_words = [
+        "로그인", "회원가입", "사이트맵", "개인정보",
+        "주메뉴 바로가기", "본문 바로가기", "하단 바로가기",
+        "학생회", "인스타", "인스타그램", "instagram",
+        "facebook", "youtube", "sns", "팔로우",
+        "이전", "다음", "검색", "목록", "닫기"
+    ]
+
+    if any(word.lower() in text.lower() for word in bad_words):
+        return False
+
+    if not re.search(r"[가-힣A-Za-z0-9]", text):
+        return False
+
+    return True
+
+
 # ==============================
 # 3. DISU 공지 가져오기
 # ==============================
 def get_disu_notices(site_name, url):
     notices = []
 
+    # DISU는 여러 페이지 확인
     max_pages = 5
 
     for page in range(1, max_pages + 1):
@@ -217,6 +192,7 @@ def get_disu_notices(site_name, url):
         for row in rows:
             cols = row.find_all("td")
 
+            # No. | 분류 | 제목 | 날짜 | 조회수
             if len(cols) < 5:
                 continue
 
@@ -257,7 +233,6 @@ def get_disu_notices(site_name, url):
 # ==============================
 # 4. 숭실대 전자정보공학부 공지 가져오기
 # ==============================
-
 def get_infocom_notices(site_name, url):
     notices = []
 
@@ -277,12 +252,17 @@ def get_infocom_notices(site_name, url):
 
     # ==============================
     # 1. 실제 공지 목록 시작점 찾기
+    # 구조 예:
+    # 총 게시물
+    # 790
+    # [전자공학전공] 반도체공정교육 최종 선발자 명단 안내
+    # 2026. 06. 24
+    # 87
     # ==============================
     start_index = None
 
     for i, line in enumerate(lines):
         if line == "총 게시물":
-            # 다음 줄은 총 게시물 수, 그 다음 줄부터 공지 제목 시작
             start_index = i + 2
             break
 
@@ -298,7 +278,7 @@ def get_infocom_notices(site_name, url):
     while i < len(lines) - 1:
         title = clean_text(lines[i])
 
-        # 게시판 목록이 끝나는 지점으로 보이면 중단
+        # 게시판 목록 끝으로 보이면 중단
         if title in ["이전", "다음", "처음", "마지막", "검색", "목록"]:
             break
 
@@ -318,8 +298,7 @@ def get_infocom_notices(site_name, url):
         else:
             next_i = i + 2
 
-        # 최소한의 제목 검증만 수행
-        # bad_title처럼 단어 기반으로 강하게 제외하지 않음
+        # 단어 기반 bad_title 사용하지 않음
         if len(title) >= 5 and not extract_date(title) and not title.isdigit():
             link = find_link_for_title(soup, url, title)
 
@@ -338,6 +317,7 @@ def get_infocom_notices(site_name, url):
         i = next_i
 
     return deduplicate_notices(notices)[:50]
+
 
 # ==============================
 # 5. 사이트별 공지 가져오기
@@ -359,6 +339,7 @@ def load_seen_notices():
     if os.path.exists(save_file):
         with open(save_file, "r", encoding="utf-8") as f:
             return json.load(f)
+
     return []
 
 
@@ -373,7 +354,7 @@ def save_seen_notices(seen_notices):
 def send_discord_notification(notice):
     if not DISCORD_WEBHOOK_URL:
         print("[알림 생략] 디스코드 웹훅 URL이 설정되지 않았습니다.")
-        return
+        return False
 
     content = (
         f"📢 **새 공지 발견!**\n\n"
@@ -395,12 +376,15 @@ def send_discord_notification(notice):
 
         if response.status_code in [200, 204]:
             print(f"[알림 전송 완료] {notice.get('title', '')}")
-        else:
-            print(f"[알림 전송 실패] 상태코드: {response.status_code}")
-            print(response.text)
+            return True
+
+        print(f"[알림 전송 실패] 상태코드: {response.status_code}")
+        print(response.text)
+        return False
 
     except Exception as e:
         print(f"[알림 오류] {e}")
+        return False
 
 
 # ==============================
@@ -429,20 +413,18 @@ def check_all_sites():
         for notice in notices:
             if notice["id"] not in seen_notices:
                 new_notices.append(notice)
-                seen_notices.append(notice["id"])
 
             all_notices.append(notice)
 
-    save_seen_notices(seen_notices)
+    return all_notices, new_notices, seen_notices
 
-    return all_notices, new_notices
 
 def main():
     print("=" * 60)
     print("공지 확인 시작:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print("=" * 60)
 
-    all_notices, new_notices = check_all_sites()
+    all_notices, new_notices, seen_notices = check_all_sites()
 
     print(f"전체 공지 수: {len(all_notices)}")
     print(f"새 공지 수: {len(new_notices)}")
@@ -455,9 +437,16 @@ def main():
             print("날짜:", notice.get("date", ""))
             print("링크:", notice.get("link", ""))
 
-            send_discord_notification(notice)
+            sent = send_discord_notification(notice)
+
+            # 알림 전송 성공했을 때만 seen 목록에 저장
+            # 이렇게 해야 알림 실패 시 다음 실행에서 다시 시도함
+            if sent:
+                seen_notices.append(notice["id"])
     else:
         print("새 공지가 없습니다.")
+
+    save_seen_notices(seen_notices)
 
     print("=" * 60)
     print("공지 확인 종료")
