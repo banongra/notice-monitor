@@ -86,18 +86,9 @@ def is_bad_title(title):
         return True
 
     bad_words = [
-        "로그인", "회원가입", "사이트맵", "개인정보", "이전", "다음",
-        "공지사항", "News", "Q&A", "FAQ", "오시는 길",
-        "학부소개", "교수진", "교육", "입학", "졸업",
-        "자랑스런 우리학부", "진로 및 산업분야", "진로 및 ㅅ산업분야",
-        "학사정보", "교과과정", "대학원", "자료실",
-        "전자정보공학부", "숭실대학교", "주메뉴 바로가기",
-        "본문 바로가기", "하단 바로가기", "Skip to content",
-        "TOP", "HOME", "사이트 바로가기", "검색", "목록",
-        "전체", "학부공지", "일반공지", "게시판", "번호", "제목",
-        "작성일", "조회수", "첨부파일",
-        "학생회", "인스타", "인스타그램", "instagram", "facebook",
-        "youtube", "sns", "팔로우"
+        "로그인", "회원가입", "사이트맵",
+        "주메뉴 바로가기", "본문 바로가기", "하단 바로가기",
+        "학생회", "인스타", "인스타그램",
     ]
 
     if any(word.lower() in title.lower() for word in bad_words):
@@ -266,6 +257,7 @@ def get_disu_notices(site_name, url):
 # ==============================
 # 4. 숭실대 전자정보공학부 공지 가져오기
 # ==============================
+
 def get_infocom_notices(site_name, url):
     notices = []
 
@@ -283,65 +275,67 @@ def get_infocom_notices(site_name, url):
         if line:
             lines.append(line)
 
+    # ==============================
+    # 1. 실제 공지 목록 시작점 찾기
+    # ==============================
+    start_index = None
+
     for i, line in enumerate(lines):
-        date = extract_date(line)
-
-        if not date:
-            continue
-
-        title = ""
-        views = ""
-
-        # 날짜 줄 자체에 조회수가 붙은 경우
-        same_line_view_match = re.search(
-            r"20\d{2}\s*[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}\.?\s+(\d+)",
-            line
-        )
-
-        if same_line_view_match:
-            views = same_line_view_match.group(1)
-
-        # 날짜 다음 줄이 숫자면 조회수로 판단
-        if not views and i + 1 < len(lines) and is_number_text(lines[i + 1]):
-            views = clean_text(lines[i + 1])
-
-        # 날짜 위쪽에서 제목 찾기
-        # 제목과 날짜 사이에 첨부파일/new/icon 등이 끼는 경우가 있어서 12줄까지 탐색
-        for j in range(i - 1, max(i - 13, -1), -1):
-            candidate = clean_text(lines[j])
-
-            # 제목 후보에서 제외할 잡음
-            noise_words = [
-                "첨부", "첨부파일", "파일", "new", "NEW",
-                "N", "아이콘", "조회", "조회수",
-                "작성일", "등록일", "분류"
-            ]
-
-            if any(word in candidate for word in noise_words):
-                continue
-
-            if not is_probable_notice_title(candidate):
-                continue
-
-            title = candidate
+        if line == "총 게시물":
+            # 다음 줄은 총 게시물 수, 그 다음 줄부터 공지 제목 시작
+            start_index = i + 2
             break
 
-        if not title:
+    if start_index is None:
+        print("[경고] '총 게시물' 위치를 찾지 못했습니다.")
+        return notices
+
+    # ==============================
+    # 2. 제목 / 날짜 / 조회수 구조로 읽기
+    # ==============================
+    i = start_index
+
+    while i < len(lines) - 1:
+        title = clean_text(lines[i])
+
+        # 게시판 목록이 끝나는 지점으로 보이면 중단
+        if title in ["이전", "다음", "처음", "마지막", "검색", "목록"]:
+            break
+
+        # 제목 다음 줄이 날짜인지 확인
+        date = extract_date(lines[i + 1])
+
+        if not date:
+            i += 1
             continue
 
-        link = find_link_for_title(soup, url, title)
+        views = ""
 
-        notices.append({
-            "site": site_name,
-            "type": "일반공지",
-            "no": "",
-            "category": "",
-            "title": title,
-            "date": date,
-            "views": views,
-            "link": link,
-            "id": f"{site_name}_{title}_{date}"
-        })
+        # 날짜 다음 줄이 숫자면 조회수
+        if i + 2 < len(lines) and is_number_text(lines[i + 2]):
+            views = clean_text(lines[i + 2])
+            next_i = i + 3
+        else:
+            next_i = i + 2
+
+        # 최소한의 제목 검증만 수행
+        # bad_title처럼 단어 기반으로 강하게 제외하지 않음
+        if len(title) >= 5 and not extract_date(title) and not title.isdigit():
+            link = find_link_for_title(soup, url, title)
+
+            notices.append({
+                "site": site_name,
+                "type": "일반공지",
+                "no": "",
+                "category": "",
+                "title": title,
+                "date": date,
+                "views": views,
+                "link": link,
+                "id": f"{site_name}_{title}_{date}"
+            })
+
+        i = next_i
 
     return deduplicate_notices(notices)[:50]
 
